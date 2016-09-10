@@ -1,246 +1,385 @@
-const canvas = document.getElementById('tetris');
-const context = canvas.getContext('2d');
+class Vec
+{
+    constructor(x = 0, y = 0)
+    {
+        this.x = x;
+        this.y = y;
+    }
+}
 
-context.scale(20, 20);
+class Rect
+{
+    constructor(w, h) {
+        this.color = '#fff';
+        this.pos = new Vec;
+        this.size = new Vec(w, h);
+    }
+    collides(shape)
+    {
+        return shape.bottom > this.top &&
+            shape.right > this.left &&
+            shape.left < this.right &&
+            shape.top < this.bottom;
+    }
+    draw(context)
+    {
+        context.fillStyle = this.color;
+        context.fillRect(this.pos.x, this.pos.y, this.size.x, this.size.y);
+    }
+    get top() {
+        return this.pos.y;
+    }
+    get bottom() {
+        return this.pos.y + this.size.y;
+    }
+    get left() {
+        return this.pos.x;
+    }
+    get right() {
+        return this.pos.x + this.size.x;
+    }
+}
 
-function arenaSweep() {
-    let rowCount = 1;
-    outer: for (let y = arena.length - 1; y > 0; --y) {
-        for (let x = 0; x < arena[y].length; ++x) {
-            if (arena[y][x] === 0) {
-                continue outer;
+class Circle
+{
+    constructor(r)
+    {
+        this.color = '#fff';
+        this.pos = new Vec;
+        this.radius = r;
+    }
+    draw(context)
+    {
+        context.fillStyle = this.color;
+        context.beginPath();
+        context.arc(this.pos.x, this.pos.y,
+                    this.radius, 0, 2 * Math.PI, false);
+        context.fill();
+    }
+    get top() {
+        return this.pos.y - this.radius;
+    }
+    get bottom() {
+        return this.pos.y + this.radius;
+    }
+    get left() {
+        return this.pos.x - this.radius;
+    }
+    get right() {
+        return this.pos.x + this.radius;
+    }
+}
+
+class Player extends Rect
+{
+    constructor() {
+        super(40, 12);
+        this._lastPos = new Vec(null, null);
+        this.vel = new Vec;
+        this.retries = 2;
+        this.ball = null;
+    }
+    fire()
+    {
+        if (this.ball) {
+            this.ball.vel.y = -200;
+            this.ball.vel.x = this.vel.x / 2;
+            this.ball.state = this.ball.STATE_FLYING;
+            this.ball = null;
+        }
+    }
+    update(dt)
+    {
+        this.vel.x = (this.pos.x - this._lastPos.x) / dt;
+        this.vel.y = (this.pos.y - this._lastPos.y) / dt;
+        this._lastPos.x = this.pos.x;
+        this._lastPos.y = this.pos.y;
+    }
+}
+
+class Block extends Rect
+{
+    constructor()
+    {
+        super(20, 10);
+        this.health = 1;
+    }
+    collides(ball)
+    {
+        if (super.collides(ball)) {
+            --this.health;
+            console.log(this.health);
+            return true;
+        }
+        return false;
+    }
+}
+
+class Ball extends Circle
+{
+    constructor()
+    {
+        super(3);
+        this.STATE_ATTACHED = 0;
+        this.STATE_FLYING = 1;
+
+        this.state = 0;
+        this.vel = new Vec;
+    }
+}
+
+class Level
+{
+    constructor()
+    {
+        this.arena = new Rect(256, 240);
+        this.arena.color = '#2020CC';
+
+        this.blocks = [];
+    }
+    addBlock(block) {
+        this.blocks.push(block);
+    }
+    update(dt) {
+        this.blocks = this.blocks.filter(block => block.health > 0);
+    }
+}
+
+class Timer
+{
+    constructor(sim, update)
+    {
+        let accumulator = 0;
+        this._time = 0;
+        this._listener = (time = this._time) => {
+            const delta = (time - this._time) / 1000;
+            accumulator += delta;
+            while (accumulator > this.step) {
+                sim(this.step);
+                accumulator -= this.step;
+            }
+
+            update(delta);
+
+            if (!this._paused) {
+                this._frameId = requestAnimationFrame(this._listener);
+            }
+
+            this._time = time;
+        }
+
+        this._frameId = null;
+        this._paused = true;
+
+        this.step = 1/120;
+    }
+    pause()
+    {
+        if (!this._paused) {
+            this._paused = true;
+            cancelAnimationFrame(this._frameId);
+        }
+    }
+    run()
+    {
+        if (this._paused) {
+            this._paused = false;
+            this._listener();
+        }
+    }
+}
+
+class Arkanoid
+{
+    constructor(canvas)
+    {
+        this._canvas = canvas;
+        this._context = canvas.getContext('2d');
+
+        this.player = new Player();
+        this.ball = new Ball();
+
+        this.levelIndex = 0;
+        this.levels = [];
+
+        this.level = null;
+
+        this.timer = new Timer(
+            dt => this.update(dt),
+            dt => {
+                this.player.update(dt);
+                this.draw();
+            });
+    }
+    collides(ball)
+    {
+        const blocks = this.level.blocks;
+        for (let i = 0, l = blocks.length; i !== l; ++i) {
+            const block = blocks[i];
+            if (block.collides(ball)) {
+                return block;
             }
         }
 
-        const row = arena.splice(y, 1)[0].fill(0);
-        arena.unshift(row);
-        ++y;
+        if (this.player.collides(ball)) {
+            return this.player;
+        }
 
-        player.score += rowCount * 10;
-        rowCount *= 2;
+        return false;
     }
-}
+    draw()
+    {
+        this._context.fillStyle = '#000';
+        this._context.fillRect(0, 0,
+                               this._canvas.width,
+                               this._canvas.height);
 
-function collide(arena, player) {
-    const [m, o] = [player.matrix, player.pos];
-    for (let y = 0; y < m.length; ++y) {
-        for (let x = 0; x < m[y].length; ++x) {
-            if (m[y][x] !== 0 &&
-                (arena[y + o.y] &&
-                arena[y + o.y][x + o.x]) !== 0) {
-                return true;
+        this.drawShape(this.level.arena);
+
+        this.drawShape(this.player);
+        this.drawShape(this.ball);
+        this.level.blocks.forEach(block => this.drawShape(block));
+
+    }
+    drawShape(shape)
+    {
+        shape.draw(this._context);
+    }
+    loadLevel(url)
+    {
+        const colors = [
+            null,
+            '#FF0D72',
+            '#0DC2FF',
+            '#0DFF72',
+            '#F538FF',
+            '#FF8E0D',
+            '#FFE138',
+            '#3877FF',
+        ];
+
+        return fetch(url)
+            .then(response => response.text())
+            .then(text => {
+                const level = new Level();
+
+                const rows = text.split('\n');
+                const dimensions = rows.shift().split('x').map(parseFloat);
+
+                const blockSize = {
+                    x: level.arena.size.x / dimensions[0],
+                    y: level.arena.size.y / dimensions[1],
+                };
+
+                rows.forEach((row, y) => {
+                    row.split('').forEach((type, x) => {
+                        if (!colors[type]) {
+                            return;
+                        }
+                        const block = new Block();
+                        block.pos.x = blockSize.x * x;
+                        block.pos.y = blockSize.y * y;
+                        block.size.x = blockSize.x;
+                        block.size.y = blockSize.y;
+                        block.color = colors[type];
+
+                        level.addBlock(block);
+                    });
+                });
+
+                this.level = level;
+                this.reset();
+            });
+    }
+    goToLevel(index)
+    {
+        this.timer.pause();
+        return this.loadLevel(this.levels[index])
+            .then(() => this.timer.run());
+    }
+    reset()
+    {
+        this.player.pos.y = this.level.arena.size.y - 20;
+        this.player.ball = this.ball;
+        this.ball.state = this.ball.STATE_ATTACHED;
+    }
+    start()
+    {
+        this.goToLevel(0);
+    }
+    update(dt) {
+        const b = this.ball,
+              p = this.player,
+              a = this.level.arena;
+
+        if (b.state === b.STATE_ATTACHED) {
+            b.pos.x = p.pos.x + p.size.x / 2;
+            b.pos.y = p.pos.y - b.radius;
+        } else {
+            let block;
+            b.pos.x += b.vel.x * dt;
+            if (block = this.collides(b)) {
+                if (b.vel.x > 0) {
+                    b.pos.x = block.left - b.radius;
+                } else {
+                    b.pos.x = block.right + b.radius;
+                }
+
+                b.vel.x *= -1;
+                if (block.vel) {
+                    //b.vel.y = b.vel.y + block.vel.y;
+                }
+            } else {
+                b.pos.y += b.vel.y * dt;
+                if (block = this.collides(b)) {
+                    if (b.vel.y > 0) {
+                        b.pos.y = block.top - b.radius;
+                    } else {
+                        b.pos.y = block.bottom + b.radius;
+                    }
+
+                    b.vel.y = -b.vel.y;
+
+                    if (block.vel) {
+                        b.vel.x += (block.vel.x - b.vel.x) / 2;
+                    }
+                }
             }
         }
-    }
-    return false;
-}
 
-function createMatrix(w, h) {
-    const matrix = [];
-    while (h--) {
-        matrix.push(new Array(w).fill(0));
-    }
-    return matrix;
-}
+        this.level.update(dt);
 
-function createPiece(type) {
-    if (type === 'T') {
-        return [
-            [0, 0, 0],
-            [1, 1, 1],
-            [0, 1, 0],
-        ];
-    } else if (type === 'O') {
-        return [
-            [2, 2],
-            [2, 2],
-        ];
-    } else if (type === 'L') {
-        return [
-            [0, 3, 0],
-            [0, 3, 0],
-            [0, 3, 3],
-        ];
-    } else if (type === 'J') {
-        return [
-            [0, 4, 0],
-            [0, 4, 0],
-            [4, 4, 0],
-        ];
-    } else if (type === 'I') {
-        return [
-            [0, 5, 0, 0],
-            [0, 5, 0, 0],
-            [0, 5, 0, 0],
-            [0, 5, 0, 0],
-        ];
-    } else if (type === 'S') {
-        return [
-            [0, 6, 6],
-            [6, 6, 0],
-            [0, 0, 0],
-        ];
-    } else if (type === 'Z') {
-        return [
-            [7, 7, 0],
-            [0, 7, 7],
-            [0, 0, 0],
-        ];
-    }
-}
-
-function draw() {
-    context.fillStyle = '#000';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-
-    drawMatrix(arena, {x: 0, y: 0});
-    drawMatrix(player.matrix, player.pos);
-}
-
-function drawMatrix(matrix, offset) {
-    matrix.forEach((row, y) => {
-        row.forEach((value, x) => {
-            if (value !== 0) {
-                context.fillStyle = colors[value];
-                context.fillRect(x + offset.x,
-                                 y + offset.y,
-                                 1, 1);
-            }
-        });
-    });
-}
-
-function merge(arena, player) {
-    player.matrix.forEach((row, y) => {
-        row.forEach((value, x) => {
-            if (value !== 0) {
-                arena[y + player.pos.y][x + player.pos.x] = value;
-            }
-        });
-    });
-}
-
-function playerDrop() {
-    player.pos.y++;
-    if (collide(arena, player)) {
-        player.pos.y--;
-        merge(arena, player);
-        playerReset();
-        arenaSweep();
-        updateScore();
-    }
-    dropCounter = 0;
-}
-
-function playerMove(dir) {
-    player.pos.x += dir;
-    if (collide(arena, player)) {
-        player.pos.x -= dir;
-    }
-}
-
-function playerReset() {
-    const pieces = 'ILJOTSZ';
-    player.matrix = createPiece(pieces[pieces.length * Math.random() | 0]);
-    player.pos.y = 0;
-    player.pos.x = (arena[0].length / 2 | 0) -
-                   (player.matrix[0].length / 2 | 0);
-    if (collide(arena, player)) {
-        arena.forEach(row => row.fill(0));
-        player.score = 0;
-        updateScore();
-    }
-}
-
-function playerRotate(dir) {
-    const pos = player.pos.x;
-    let offset = 1;
-    rotate(player.matrix, dir);
-    while (collide(arena, player)) {
-        player.pos.x += offset;
-        offset = -(offset + (offset > 0 ? 1 : -1));
-        if (offset > player.matrix[0].length) {
-            rotate(player.matrix, -dir);
-            player.pos.x = pos;
+        if (b.top < a.top) {
+            b.vel.y = -b.vel.y;
+        } else if (b.top > a.bottom) {
+            --p.retries;
+            this.reset();
             return;
         }
-    }
-}
+        if (b.left < a.left || b.right > a.right) {
+            b.vel.x = -b.vel.x;
+        }
 
-function rotate(matrix, dir) {
-    for (let y = 0; y < matrix.length; ++y) {
-        for (let x = 0; x < y; ++x) {
-            [
-                matrix[x][y],
-                matrix[y][x],
-            ] = [
-                matrix[y][x],
-                matrix[x][y],
-            ];
+        if (this.level.blocks.length === 0) {
+            this.goToLevel(++this.levelIndex);
         }
     }
-
-    if (dir > 0) {
-        matrix.forEach(row => row.reverse());
-    } else {
-        matrix.reverse();
-    }
 }
 
-let dropCounter = 0;
-let dropInterval = 1000;
+const canvas = document.getElementById('arkanoid');
+const arkanoid = new Arkanoid(canvas);
 
-let lastTime = 0;
-function update(time = 0) {
-    const deltaTime = time - lastTime;
-    lastTime = time;
+arkanoid.levels.push(
+    'levels/level1.txt',
+    'levels/level2.txt',
+    'levels/level3.txt'
+);
 
-    dropCounter += deltaTime;
-    if (dropCounter > dropInterval) {
-        playerDrop();
-    }
-
-    draw();
-    requestAnimationFrame(update);
-}
-
-function updateScore() {
-    document.getElementById('score').innerText = player.score;
-}
-
-const colors = [
-    null,
-    '#FF0D72',
-    '#0DC2FF',
-    '#0DFF72',
-    '#F538FF',
-    '#FF8E0D',
-    '#FFE138',
-    '#3877FF',
-];
-
-const arena = createMatrix(12, 20);
-
-const player = {
-    pos: {x: 0, y: 0},
-    matrix: null,
-    score: 0,
-}
-
-document.addEventListener('keydown', event => {
-    if (event.keyCode === 37) {
-        playerMove(-1);
-    } else if (event.keyCode === 39) {
-        playerMove(1);
-    } else if (event.keyCode === 40) {
-        playerDrop();
-    } else if (event.keyCode === 81) {
-        playerRotate(-1);
-    } else if (event.keyCode === 87) {
-        playerRotate(1);
-    }
+canvas.addEventListener('mousemove', (event) => {
+    arkanoid.player.pos.x = event.layerX;
+});
+canvas.addEventListener('mousedown', (event) => {
+    arkanoid.player.fire();
 });
 
-playerReset();
-updateScore();
-update();
+arkanoid.start();
