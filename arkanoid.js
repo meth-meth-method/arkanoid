@@ -301,6 +301,7 @@ class Arkanoid
     }
     goToLevel(index)
     {
+        this.levelIndex = index;
         this.timer.pause();
         return this.loadLevel(this.levels[index])
             .then(() => this.timer.run());
@@ -363,7 +364,7 @@ class Arkanoid
 
             this.level.update(dt);
 
-            if (b.top < a.top) {
+            if (b.top < a.top && b.vel.y < 0) {
                 b.vel.y = -b.vel.y;
                 this.playAudio('bounce2');
             } else if (b.top > a.bottom) {
@@ -381,14 +382,14 @@ class Arkanoid
                     return;
                 }
             }
-            if (b.left < a.left || b.right > a.right) {
+            if (b.left < a.left && b.vel.x < 0 || b.right > a.right && b.vel.x > 0) {
                 this.playAudio('bounce3');
                 b.vel.x = -b.vel.x;
             }
         });
 
         if (this.level.blocks.length === 0) {
-            this.goToLevel(++this.levelIndex);
+            this.goToLevel(this.levelIndex + 1);
         }
     }
     updateVelocity(ball, component, dt)
